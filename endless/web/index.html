@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>endless-learner</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e8ee; --muted: #8b93a7;
+    --accent: #6cb6ff; --good: #5fd38d; --bad: #ff7b72; --warn: #e3b341; --ghost: #c39bff;
+    --ground: #3a4252; --block: #d0d6e2; --overhang: #e3b341; --moving: #ff7b72; --pit: #0f1115;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 16px 20px 4px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .status { color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+  .dot.on { background: var(--good); }
+  main { padding: 8px 20px 32px; max-width: 1400px; margin: 0 auto; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .kpi .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi .l { color: var(--muted); font-size: 12px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+  .panel h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .stage-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .stage-head .info { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+  select, button { background: #222734; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  button { cursor: pointer; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  canvas { width: 100%; display: block; }
+  #stage { height: 240px; background: #12151b; border-radius: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+  .grid .panel { margin: 0; }
+  .chart { height: 190px; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } main, header { padding-left: 16px; padding-right: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>endless-learner</h1>
+  <span class="status"><span class="dot" id="dot"></span><span id="status">connecting</span></span>
+</header>
+<main>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="panel">
+    <div class="stage-head">
+      <button id="modeLive" class="on">Live</button>
+      <button id="modeRace">Ghost race</button>
+      <span id="raceCtl" hidden>
+        <select id="raceA"></select> vs <select id="raceB"></select>
+        <button id="raceGo">Race</button>
+      </span>
+      <span class="info" id="stageInfo"></span>
+    </div>
+    <canvas id="stage"></canvas>
+    <div class="legend" id="stageLegend"></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel"><h2>Tier and frontier</h2><canvas class="chart" id="cTier"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>training tier</span><span><i style="background:var(--good)"></i>frontier (80% of held-out levels)</span></div></div>
+    <div class="panel"><h2>Held-out success by tier, every eval round</h2><canvas class="chart" id="cHeat"></canvas>
+      <div class="note">Rows are tiers (0 at the bottom), columns are eval rounds. A row that fades after going bright is forgetting.</div></div>
+    <div class="panel"><h2>Exams: unseen levels, no exploration</h2><canvas class="chart" id="cProg"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>share of the course covered</span><span><i style="background:var(--good)"></i>success rate</span></div></div>
+    <div class="panel"><h2>Deaths per exam, by cause</h2><canvas class="chart" id="cDeath"></canvas><div class="legend" id="deathLegend"></div></div>
+    <div class="panel"><h2>Learning from failure</h2><canvas class="chart" id="cFail"></canvas>
+      <div class="legend"><span><i style="background:var(--good)"></i>death-bank restarts passed</span><span><i style="background:var(--bad)"></i>|TD| near deaths</span><span><i style="background:var(--muted)"></i>|TD| routine</span></div></div>
+    <div class="panel"><h2>Plasticity</h2><canvas class="chart" id="cPlast"></canvas>
+      <div class="legend"><span><i style="background:var(--bad)"></i>dead units (share)</span><span><i style="background:var(--accent)"></i>feature rank (srank / width)</span></div></div>
+    <div class="panel"><h2>Training signals</h2><canvas class="chart" id="cLoss"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>loss</span><span><i style="background:var(--warn)"></i>mean Q (right axis)</span></div></div>
+    <div class="panel"><h2>System</h2><canvas class="chart" id="cSys"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>steps/s</span><span><i style="background:var(--warn)"></i>RAM in MB (right axis)</span><span><i style="background:var(--muted)"></i>CPU % of one core (right axis)</span></div></div>
+  </div>
+</main>
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const $ = id => document.getElementById(id);
+const fmt = (x, d = 0) => x == null || isNaN(x) ? "–" : Number(x).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+const DEATH_COLORS = ["#ff7b72", "#e3b341", "#6cb6ff", "#5fd38d", "#c39bff", "#ffa657", "#79c0ff", "#f778ba", "#a5d6ff", "#7ee787"];
+
+function setupCanvas(c) {
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  c.width = Math.max(1, r.width * dpr); c.height = Math.max(1, r.height * dpr);
+  const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [g, r.width, r.height];
+}
+
+// ---- line charts -----------------------------------------------------------
+const decimals = ([lo, hi]) => { const span = (hi - lo) / 4; return span >= 5 ? 0 : span >= 0.5 ? 1 : span >= 0.05 ? 2 : 3; };
+
+function lineChart(c, series, opt = {}) {
+  const [g, W, H] = setupCanvas(c);
+  const pad = { l: 44, r: opt.right ? 44 : 10, t: 8, b: 22 };
+  g.clearRect(0, 0, W, H);
+  const all = series.filter(s => s.x.length);
+  if (!all.length) { g.fillStyle = css("--muted"); g.fillText("no data yet", pad.l, H / 2); return; }
+  const xs = all.flatMap(s => s.x);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs) || 1;
+  const range = axis => {
+    const v = all.filter(s => (s.axis || "l") === axis).flatMap(s => s.y.filter(y => y != null));
+    if (!v.length) return null;
+    let lo = opt[axis + "min"] ?? Math.min(...v), hi = opt[axis + "max"] ?? Math.max(...v);
+    if (hi === lo) hi = lo + 1;
+    return [lo, hi];
+  };
+  const R = { l: range("l"), r: range("r") };
+  const X = x => pad.l + (x - x0) / ((x1 - x0) || 1) * (W - pad.l - pad.r);
+  const Y = (y, a) => { const [lo, hi] = R[a]; return H - pad.b - (y - lo) / (hi - lo) * (H - pad.t - pad.b); };
+  g.strokeStyle = css("--line"); g.fillStyle = css("--muted"); g.font = "11px system-ui"; g.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const yy = pad.t + i * (H - pad.t - pad.b) / 4;
+    g.beginPath(); g.moveTo(pad.l, yy); g.lineTo(W - pad.r, yy); g.stroke();
+    if (R.l) g.fillText(fmt(R.l[1] - i * (R.l[1] - R.l[0]) / 4, opt.ld ?? decimals(R.l)), 2, yy + 4);
+    if (R.r) g.fillText(fmt(R.r[1] - i * (R.r[1] - R.r[0]) / 4, opt.rd ?? decimals(R.r)), W - pad.r + 4, yy + 4);
+  }
+  for (let i = 0; i <= 4; i++) {
+    const xv = x0 + i * (x1 - x0) / 4;
+    g.fillText(fmt(xv, decimals([x0, x1]) + 1) + (i === 4 ? " h" : ""), X(xv) - 10, H - 6);
+  }
+  for (const s of all) {
+    const a = s.axis || "l";
+    g.strokeStyle = s.color; g.lineWidth = s.width || 1.6; g.beginPath();
+    let pen = false;
+    s.x.forEach((x, i) => {
+      const y = s.y[i];
+      if (y == null) { pen = false; return; }
+      if (s.step && pen) g.lineTo(X(x), Y(s.y[i - 1], a));
+      pen ? g.lineTo(X(x), Y(y, a)) : g.moveTo(X(x), Y(y, a));
+      pen = true;
+    });
+    g.stroke();
+  }
+}
+
+function heatmap(c, evals) {
+  const [g, W, H] = setupCanvas(c);
+  g.clearRect(0, 0, W, H);
+  const rows = evals.filter(e => e.split === "heldout");
+  if (!rows.length) { g.fillStyle = css("--muted"); g.fillText("first eval round pending", 44, H / 2); return; }
+  const rounds = [...new Set(rows.map(r => r.round))].sort((a, b) => a - b);
+  const maxT = Math.max(...rows.map(r => r.tier));
+  const pad = { l: 44, r: 10, t: 8, b: 22 };
+  const cw = (W - pad.l - pad.r) / rounds.length, ch = (H - pad.t - pad.b) / (maxT + 1);
+  const ri = new Map(rounds.map((r, i) => [r, i]));
+  for (const r of rows) {
+    const v = r.success;
+    g.fillStyle = `rgba(95, 211, 141, ${0.06 + 0.94 * v})`;
+    g.fillRect(pad.l + ri.get(r.round) * cw, H - pad.b - (r.tier + 1) * ch, Math.max(cw - 1, 1), Math.max(ch - 1, 1));
+  }
+  g.fillStyle = css("--muted"); g.font = "11px system-ui";
+  for (let t = 0; t <= maxT; t += Math.max(1, Math.ceil((maxT + 1) / 8))) g.fillText("tier " + t, 2, H - pad.b - t * ch - ch / 2 + 4);
+  g.fillText("round " + rounds[0], pad.l, H - 6);
+  g.fillText("round " + rounds[rounds.length - 1], W - pad.r - 60, H - 6);
+}
+
+// ---- the stage -------------------------------------------------------------
+const stage = { runs: [], level: null, tick: 0, mode: "live", busy: false, labels: [] };
+const RAY_DEG = [-50, -32, -18, -7, 3, 14, 27, 42, 60];
+
+function drawStage() {
+  const c = $("stage");
+  const [g, W, H] = setupCanvas(c);
+  g.clearRect(0, 0, W, H);
+  const L = stage.level;
+  if (!L) return;
+  const scale = W / 34, groundY = H - 40;
+  const lead = stage.runs[0];
+  const t = Math.min(stage.tick, Math.max(...stage.runs.map(r => r.frames.length ? r.frames[r.frames.length - 1][0] : 0)));
+  const px = t * L.speed, camX = px - 6;
+  const SX = x => (x - camX) * scale, SY = y => groundY - y * scale;
+  // ground with gaps
+  g.fillStyle = css("--ground");
+  let x = camX;
+  const gaps = L.gaps.filter(gp => gp[1] > camX && gp[0] < camX + 40);
+  for (const gp of gaps) { if (gp[0] > x) g.fillRect(SX(x), groundY, (gp[0] - x) * scale, 40); x = Math.max(x, gp[1]); }
+  g.fillRect(SX(x), groundY, (camX + 40 - x) * scale, 40);
+  // finish line
+  if (L.length < camX + 40) { g.fillStyle = css("--good"); g.fillRect(SX(L.length), groundY - 120, 3, 120); }
+  // boxes: [kind, x0, x1, y0, y1, u]
+  for (const b of L.boxes) {
+    const s = b[5] * t, a = b[1] - s, e = b[2] - s;
+    if (e < camX || a > camX + 40) continue;
+    g.fillStyle = b[0] === 2 ? css("--overhang") : b[0] === 3 ? css("--moving") : css("--block");
+    const top = Math.min(b[4], 12);
+    g.fillRect(SX(a), SY(top), (e - a) * scale, (top - b[3]) * scale);
+  }
+  // agents
+  stage.runs.forEach((r, i) => {
+    const f = r.frames.length ? r.frames[Math.min(Math.max(0, t - r.frames[0][0]), r.frames.length - 1)] : null;
+    if (!f) return;
+    const dead = t >= r.frames[r.frames.length - 1][0] && !r.success;
+    const h = f[2] ? 1 : 2, ax = f[0] * L.speed, ay = f[1];
+    const color = i === 0 ? css("--accent") : css("--ghost");
+    if (i === 0 && r.rays && !dead) {
+      const k = r.rays.findLastIndex(q => q[0] <= f[0]);
+      if (k >= 0) {
+        const [, dist, kind] = r.rays[k];
+        const ox = ax + 1, oy = ay + h / 2;
+        RAY_DEG.forEach((deg, j) => {
+          const rad = deg * Math.PI / 180, d = dist[j];
+          g.strokeStyle = kind[j] >= 2 ? "rgba(255,123,114,.55)" : kind[j] === 1 ? "rgba(227,179,65,.6)" : "rgba(108,182,255,.18)";
+          g.beginPath(); g.moveTo(SX(ox), SY(oy)); g.lineTo(SX(ox + Math.cos(rad) * d), SY(oy + Math.sin(rad) * d)); g.stroke();
+        });
+      }
+    }
+    g.globalAlpha = dead ? 0.35 : (i === 0 ? 1 : 0.75);
+    g.fillStyle = color;
+    g.fillRect(SX(ax), SY(ay + h), scale, h * scale);
+    g.globalAlpha = 1;
+  });
+  const parts = stage.runs.map((r, i) => {
+    const end = r.frames.length ? r.frames[r.frames.length - 1][0] : 0;
+    const done = t >= end;
+    const res = done ? (r.success ? "finished" : "died: " + r.death_sig) : Math.round(100 * Math.min(t * L.speed / L.length, 1)) + "%";
+    return `${stage.labels[i]}: ${res}`;
+  });
+  $("stageInfo").textContent = `tier ${L.tier} · seed ${L.seed} · ` + parts.join(" · ");
+}
+
+async function nextLive() {
+  if (stage.busy || stage.mode !== "live") return;
+  stage.busy = true;
+  try {
+    const d = await (await fetch("/api/play?net=latest")).json();
+    if (d.error) throw new Error(d.error);
+    stage.level = d.level; stage.runs = [d.run]; stage.tick = 0;
+    stage.labels = [`latest (${fmt(d.meta.active_hours, 2)} h)`];
+    $("stageLegend").innerHTML = `<span><i style="background:var(--accent)"></i>agent, rays in red hit a block, yellow a pit</span>`;
+  } catch (e) { $("stageInfo").textContent = "waiting for the first weights"; setTimeout(() => { stage.busy = false; nextLive(); }, 3000); return; }
+  stage.busy = false;
+}
+
+async function race() {
+  const a = $("raceA").value, b = $("raceB").value;
+  if (!a || !b) return;
+  const d = await (await fetch(`/api/race?a=${a}&b=${b}`)).json();
+  if (d.error) { $("stageInfo").textContent = d.error; return; }
+  stage.level = d.level; stage.runs = [d.b.run, d.a.run]; stage.tick = 0;
+  stage.labels = [`${b} (${fmt(d.b.meta.active_hours, 1)} h)`, `${a} (${fmt(d.a.meta.active_hours, 1)} h)`];
+  $("stageLegend").innerHTML = `<span><i style="background:var(--accent)"></i>${stage.labels[0]}</span><span><i style="background:var(--ghost)"></i>${stage.labels[1]}, the ghost</span>`;
+}
+
+// The game runs at 60 ticks per second of real time, however often the browser gives us a frame.
+let lastFrame = null;
+function loop(ts) {
+  if (lastFrame === null) lastFrame = ts;
+  const ticks = Math.floor((ts - lastFrame) * 60 / 1000);
+  if (ticks >= 1) {
+    lastFrame += ticks * 1000 / 60;
+    if (stage.level) {
+      stage.tick += Math.min(ticks, 600);
+      const end = Math.max(...stage.runs.map(r => r.frames.length ? r.frames[r.frames.length - 1][0] : 0));
+      if (stage.tick > end + 60) { stage.mode === "live" ? nextLive() : (stage.tick = 0); }
+    }
+    drawStage();
+  }
+  requestAnimationFrame(loop);
+}
+
+$("modeLive").onclick = () => { stage.mode = "live"; $("modeLive").classList.add("on"); $("modeRace").classList.remove("on"); $("raceCtl").hidden = true; nextLive(); };
+$("modeRace").onclick = async () => {
+  stage.mode = "race"; $("modeRace").classList.add("on"); $("modeLive").classList.remove("on"); $("raceCtl").hidden = false;
+  const hof = await (await fetch("/api/hof")).json();
+  const opts = hof.map(h => `<option value="${h.name}">${h.name} · ${fmt(h.active_hours, 1)} h · tier ${h.tier}</option>`).join("");
+  $("raceA").innerHTML = opts; $("raceB").innerHTML = opts;
+  if (hof.length) { $("raceA").value = hof[0].name; $("raceB").value = hof[hof.length - 1].name; }
+  race();
+};
+$("raceGo").onclick = race;
+
+// ---- dashboard -------------------------------------------------------------
+function kpis(s) {
+  const L = s.last || {};
+  const items = [
+    ["active hours", fmt((L.active_s || 0) / 3600, 2)],
+    ["environment steps", fmt(L.steps)],
+    ["training tier", fmt(L.tier)],
+    ["frontier tier", s.frontier < 0 ? "none yet" : fmt(s.frontier)],
+    ["episodes", fmt(s.episodes)],
+    ["failures fixed", fmt(s.fixed)],
+    ["attempts to fix", fmt(s.attempts_to_fix, 1)],
+    ["steps / s", fmt(L.sps)],
+    ["RAM", fmt(L.rss_mb) + " MB"],
+    ["resumes", `${fmt(s.resumes)} (${fmt(s.lost_steps)} steps lost)`],
+  ];
+  $("kpis").innerHTML = items.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+  $("dot").className = "dot" + (s.training ? " on" : "");
+  $("status").textContent = s.training ? "training" : "not training (showing the saved run)";
+}
+
+function charts(d) {
+  const T = d.train, h = r => r.active_s / 3600;
+  const ev = d.evals.filter(e => e.split === "heldout");
+  const rounds = [...new Set(ev.map(e => e.round))].sort((a, b) => a - b);
+  const fr = rounds.map(r => { const ok = ev.filter(e => e.round === r && e.success >= 0.8).map(e => e.tier); return [ev.find(e => e.round === r).active_s / 3600, ok.length ? Math.max(...ok) : -1]; });
+  lineChart($("cTier"), [
+    { x: T.map(h), y: T.map(r => r.tier), color: css("--accent"), step: true },
+    { x: fr.map(f => f[0]), y: fr.map(f => f[1]), color: css("--good"), step: true },
+  ], { lmin: -1, lmax: Math.max(3, ...T.map(r => r.tier + 1)), ld: 0 });
+  heatmap($("cHeat"), d.evals);
+  lineChart($("cProg"), [
+    { x: d.episodes.map(e => e.hours), y: d.episodes.map(e => e.progress), color: css("--accent") },
+    { x: d.episodes.map(e => e.hours), y: d.episodes.map(e => e.success), color: css("--good") },
+  ], { lmin: 0, lmax: 1 });
+  const sigs = Object.keys(d.deaths.rates).slice(0, 8);
+  lineChart($("cDeath"), sigs.map((s, i) => ({ x: d.deaths.hours, y: d.deaths.rates[s], color: DEATH_COLORS[i] })), { lmin: 0 });
+  $("deathLegend").innerHTML = sigs.map((s, i) => `<span><i style="background:${DEATH_COLORS[i]}"></i>${s} (${fmt(d.deaths.counts[s])})</span>`).join("");
+  lineChart($("cFail"), [
+    { x: d.restarts.map(r => r.hours), y: d.restarts.map(r => r.pass_rate), color: css("--good") },
+    { x: T.map(h), y: T.map(r => r.td_near_death), color: css("--bad"), axis: "r" },
+    { x: T.map(h), y: T.map(r => r.td_routine), color: css("--muted"), axis: "r" },
+  ], { lmin: 0, lmax: 1, right: true, rd: 2 });
+  const P = d.plasticity;
+  lineChart($("cPlast"), [
+    { x: P.map(h), y: P.map(r => r.dead_frac), color: css("--bad") },
+    { x: P.map(h), y: P.map(r => r.srank / 128), color: css("--accent") },
+  ], { lmin: 0, lmax: 1 });
+  lineChart($("cLoss"), [
+    { x: T.map(h), y: T.map(r => r.loss), color: css("--accent") },
+    { x: T.map(h), y: T.map(r => r.q_mean), color: css("--warn"), axis: "r" },
+  ], { lmin: 0, right: true });
+  // The first interval has no learning updates and runs several times faster; keep it from setting the scale.
+  const sps = T.map(r => r.sps).filter(v => v != null).sort((a, b) => a - b);
+  const spsTop = sps.length ? sps[Math.floor(sps.length * 0.98)] * 1.15 : 1;
+  lineChart($("cSys"), [
+    { x: T.map(h), y: T.map(r => Math.min(r.sps, spsTop)), color: css("--accent") },
+    { x: T.map(h), y: T.map(r => r.rss_mb), color: css("--warn"), axis: "r" },
+    { x: T.map(h), y: T.map(r => r.cpu), color: css("--muted"), axis: "r" },
+  ], { lmin: 0, lmax: spsTop, right: true, rmin: 0 });
+}
+
+let lastSeries = null;
+async function refresh() {
+  try {
+    const [s, d] = await Promise.all([fetch("/api/summary").then(r => r.json()), fetch("/api/series").then(r => r.json())]);
+    kpis(s); lastSeries = d; charts(d);
+  } catch (e) { $("status").textContent = "no data yet"; }
+}
+window.addEventListener("resize", () => { if (lastSeries) charts(lastSeries); });
+refresh(); setInterval(refresh, 5000);
+nextLive();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
