@@ -222,19 +222,29 @@ function drawStage() {
     const res = done ? (r.success ? "finished" : "died: " + r.death_sig) : Math.round(100 * Math.min(t * L.speed / L.length, 1)) + "%";
     return `${stage.labels[i]}: ${res}`;
   });
-  $("stageInfo").textContent = `tier ${L.tier} · seed ${L.seed} · ` + parts.join(" · ");
+  $("stageInfo").textContent = stage.note || `tier ${L.tier} · seed ${L.seed} · ` + parts.join(" · ");
+}
+
+// The page outlives the server process; say so instead of freezing on the last frame.
+function offline(on) {
+  stage.offline = on;
+  stage.note = on ? "view server not reachable, retrying (start it with: python -m endless view --run runs/main)" : "";
+  if (on) { $("dot").className = "dot"; $("status").textContent = "view server not reachable, retrying"; }
 }
 
 async function nextLive() {
   if (stage.busy || stage.mode !== "live") return;
   stage.busy = true;
+  let r;
+  try { r = await fetch("/api/play?net=latest"); }
+  catch (e) { offline(true); setTimeout(() => { stage.busy = false; nextLive(); }, 3000); return; }
   try {
-    const d = await (await fetch("/api/play?net=latest")).json();
+    const d = await r.json();
     if (d.error) throw new Error(d.error);
-    stage.level = d.level; stage.runs = [d.run]; stage.tick = 0;
+    stage.level = d.level; stage.runs = [d.run]; stage.tick = 0; stage.note = "";
     stage.labels = [`latest (${fmt(d.meta.active_hours, 2)} h)`];
     $("stageLegend").innerHTML = `<span><i style="background:var(--accent)"></i>agent, rays in red hit a block, yellow a pit</span>`;
-  } catch (e) { $("stageInfo").textContent = "waiting for the first weights"; setTimeout(() => { stage.busy = false; nextLive(); }, 3000); return; }
+  } catch (e) { stage.note = "waiting for the first weights"; setTimeout(() => { stage.busy = false; nextLive(); }, 3000); return; }
   stage.busy = false;
 }
 
@@ -341,8 +351,12 @@ let lastSeries = null;
 async function refresh() {
   try {
     const [s, d] = await Promise.all([fetch("/api/summary").then(r => r.json()), fetch("/api/series").then(r => r.json())]);
+    if (stage.offline) { offline(false); nextLive(); }
     kpis(s); lastSeries = d; charts(d);
-  } catch (e) { $("status").textContent = "no data yet"; }
+  } catch (e) {
+    if (e instanceof TypeError) offline(true);  // fetch itself failed: the server is gone
+    else $("status").textContent = "no data yet";
+  }
 }
 window.addEventListener("resize", () => { if (lastSeries) charts(lastSeries); });
 refresh(); setInterval(refresh, 5000);
