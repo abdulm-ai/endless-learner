@@ -151,8 +151,10 @@ class Trainer:
 
     # ---- the loop -----------------------------------------------------------
 
-    def train(self, max_steps: int | None = None, max_hours: float | None = None) -> None:
+    def train(self, max_steps: int | None = None, max_hours: float | None = None, max_rss_mb: float | None = None) -> None:
+        """Run until a limit. `max_rss_mb` stops cleanly, with a checkpoint, if this process's memory passes it."""
         self._last = time.monotonic()
+        self._rss = 0.0
         self._interval_t = self._last
         self._interval_steps = self.steps
         self._interval_updates = self.agent.updates
@@ -168,6 +170,8 @@ class Trainer:
                     self.stop_reason = "max_steps"
                 elif max_hours is not None and self.active_s >= max_hours * 3600:
                     self.stop_reason = "max_hours"
+                elif max_rss_mb is not None and self._rss > max_rss_mb:
+                    self.stop_reason = f"rss_limit ({self._rss:.0f} MB > {max_rss_mb:.0f} MB)"
                 elif os.path.exists(stop_file):
                     os.remove(stop_file)
                     self.stop_reason = "stop_file"
@@ -321,6 +325,7 @@ class Trainer:
         acc = self._acc
         n = max(acc["updates"], 1)
         sps = (self.steps - self._interval_steps) / dt
+        self._rss = self.stats.rss_mb()
         ups = (self.agent.updates - self._interval_updates) / dt
         self.db.log(
             "train", wall=time.time(), active_s=self.active_s, steps=self.steps, updates=self.agent.updates,
@@ -329,7 +334,7 @@ class Trainer:
             td_routine=acc["rt"] / acc["rt_n"] if acc["rt_n"] else None,
             q_mean=acc["q_mean"] / n, q_max=acc["q_max"] if acc["updates"] else None, grad_norm=acc["grad"] / n,
             eps=self.epsilon(), beta=self.beta(), sps=sps, ups=ups, cpu=self.stats.cpu_percent(),
-            rss_mb=self.stats.rss_mb(), nan_events=self.nan_events, bank_size=len(self.bank),
+            rss_mb=self._rss, nan_events=self.nan_events, bank_size=len(self.bank),
             bank_fixed=self.bank.fixed, bank_gave_up=self.bank.gave_up, units_reset=self.agent.units_reset,
         )
         self._interval_t, self._interval_steps, self._interval_updates = now, self.steps, self.agent.updates

@@ -47,7 +47,7 @@ def cmd_train(a) -> None:
             print(f"live view: http://127.0.0.1:{a.port}", flush=True)
         except OSError as e:
             print(f"live view not started ({e}); run `python -m endless view --run {a.run}` separately")
-    trainer.train(max_steps=a.max_steps, max_hours=a.max_hours)
+    trainer.train(max_steps=a.max_steps, max_hours=a.max_hours, max_rss_mb=a.max_rss_mb)
 
 
 def cmd_view(a) -> None:
@@ -136,6 +136,7 @@ def main(argv=None) -> None:
     t.add_argument("--no-view", action="store_true")
     t.add_argument("--max-steps", type=int)
     t.add_argument("--max-hours", type=float, help="active hours")
+    t.add_argument("--max-rss-mb", type=float, default=1500, help="stop cleanly if this process passes this much RAM (default 1500)")
     t.add_argument("--hof-every", type=float, help="seconds between hall-of-fame snapshots (default 3600)")
     t.add_argument("--no-per", action="store_true", help="ablation: uniform replay")
     t.add_argument("--no-restarts", action="store_true", help="ablation: no death bank restarts")

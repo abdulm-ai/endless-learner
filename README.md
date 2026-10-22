@@ -86,7 +86,7 @@ Open http://127.0.0.1:8765 for the live view: the agent playing a held-out level
 
 | Command | What it does |
 |---------|--------------|
-| `python -m endless train --run runs/main` | Train, or resume if the folder has a checkpoint. `--max-hours`, `--max-steps` to stop on their own. |
+| `python -m endless train --run runs/main` | Train, or resume if the folder has a checkpoint. `--max-hours`, `--max-steps` to stop on their own; `--max-rss-mb` (default 1500) stops cleanly with a checkpoint if the process ever uses more RAM than that. |
 | `python -m endless stop --run runs/main` | Stop cleanly from another terminal: checkpoint, then exit. Ctrl+C does the same. |
 | `python -m endless view --run runs/main` | The live view on its own, for a run that is training in another process or has finished. |
 | `python -m endless report --run runs/main` | Every KPI. `--hof` also races the newest snapshot against each older one. |
@@ -95,7 +95,7 @@ Open http://127.0.0.1:8765 for the live view: the agent playing a held-out level
 | `python -m endless gradcheck` | Backprop against numerical gradients. |
 | `python -m unittest discover -s tests -t .` | Tests: physics, solver plans replayed in the environment, rays, sum tree, n-step returns, checkpoint and exact resume. |
 
-Ablations are flags on `train`: `--no-per`, `--no-restarts`, `--no-curriculum --fixed-tier 6`, `--no-reservoir`, `--no-old-tiers`, `--no-plr`, and `--cbp` to add continual backprop. Use a separate `--run` folder for each.
+`python scripts/ablations.py` runs the ablations below at a fixed step budget (5M) on seeds 1 to 3, three at a time, waiting for free RAM before each start and resuming anything unfinished. `--after runs/cbp` makes it wait for another run to finish first. Ablations are flags on `train`: `--no-per`, `--no-restarts`, `--no-curriculum --fixed-tier 6`, `--no-reservoir`, `--no-old-tiers`, `--no-plr`, and `--cbp` to add continual backprop. Use a separate `--run` folder for each.
 
 Keeping it running is up to you: plug the laptop in, stop it from sleeping, and start `train` again after a reboot. It carries on where it stopped.
 
