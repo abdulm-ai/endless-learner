@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from endless.env import RunnerEnv, cast_rays
+from endless.env import OBS_DIM, RunnerEnv, cast_rays, terrain_scan
 from endless.game import (
     DEAD,
     DONE,
@@ -107,6 +107,14 @@ class TestRays(unittest.TestCase):
         self.assertIn(1, kind.tolist())  # a pit
         self.assertTrue((dist > 0).all())
 
+    def test_terrain_scan_finds_gap_edges_and_blocks(self):
+        lv = make_level(boxes=[(LOW, 4.0, 5.0, 0, 1.2, 0)], gaps=[(2.0, 3.0)])
+        scan = terrain_scan(lv, START)  # samples at x = 0.5, 1.0, 1.5, ...
+        xs = 0.5 + 0.5 * np.arange(len(scan))
+        np.testing.assert_array_equal(scan[:, 0] == 0, (xs > 2.0) & (xs < 3.0))
+        np.testing.assert_allclose(scan[(xs >= 4.0) & (xs < 5.0), 1], 1.2 / 4.0)
+        self.assertEqual(scan[xs < 4.0, 1].max(), 0.0)
+
     def test_observation_shape_and_range(self):
         env = RunnerEnv()
         obs = env.reset(generate(4, 99))
@@ -115,6 +123,7 @@ class TestRays(unittest.TestCase):
             if out != RUNNING:
                 break
         self.assertEqual(obs.dtype, np.float32)
+        self.assertEqual(obs.shape, (OBS_DIM,))
         self.assertTrue(np.isfinite(obs).all())
 
 

@@ -1,9 +1,16 @@
 """The training environment: the game plus what the agent sees and is rewarded for.
 
-The agent sees a fan of ray casts from the front of its body. Each ray reports
-how far away the first thing it hits is, what that thing is (ground, a pit,
-a block or an overhang), and how fast that distance is closing, which is how
-a moving block shows up. Five more numbers describe the agent itself.
+The agent sees two things. A fan of ray casts from the front of its body: each
+ray reports how far away the first thing it hits is, what that thing is
+(ground, a pit, a block or an overhang), and how fast that distance is closing,
+which is how a moving block shows up. And a terrain scan: the course ahead
+sampled every half unit, for whether there is ground, how tall any block is,
+whether an overhang is above, and how fast a moving block is coming.
+
+The scan exists because rays alone failed on gaps. A fixed fan touches the
+ground at only four distances, so the agent could not tell where a gap's edge
+was between them, and gap jumps became guesswork. Five more numbers describe
+the agent itself.
 """
 
 from __future__ import annotations
@@ -31,7 +38,10 @@ RAY_ANGLES_DEG = (-50, -32, -18, -7, 3, 14, 27, 42, 60)
 RAY_RANGE = 18.0
 N_RAYS = len(RAY_ANGLES_DEG)
 HIT_TYPES = ("ground", "pit", "block", "overhang")
-OBS_DIM = N_RAYS * (2 + len(HIT_TYPES)) + 5
+SCAN_BINS = 24
+SCAN_STEP = 0.5  # units between samples, from the agent's centre forward
+SCAN_FEATS = 4  # ground, block height, overhang, moving-block speed
+OBS_DIM = N_RAYS * (2 + len(HIT_TYPES)) + SCAN_BINS * SCAN_FEATS + 5
 
 REWARD_PASS = 0.2
 REWARD_DEATH = -1.0
@@ -90,6 +100,28 @@ def cast_rays(level: Level, state: State, ducking: bool) -> tuple[np.ndarray, np
     return dist, kind
 
 
+_SCAN_OFFSETS = AGENT_W * 0.5 + SCAN_STEP * np.arange(SCAN_BINS)
+
+
+def terrain_scan(level: Level, state: State) -> np.ndarray:
+    """(SCAN_BINS, 4): ground present, block top / 4, overhang above, moving-block speed / 0.15."""
+    t = state[0]
+    xs = t * level.speed + _SCAN_OFFSETS
+    out = np.zeros((SCAN_BINS, SCAN_FEATS))
+    if len(level.gx0):
+        out[:, 0] = ~((xs[:, None] > level.gx0) & (xs[:, None] < level.gx1)).any(axis=1)
+    else:
+        out[:, 0] = 1.0
+    if len(level.kind):
+        shift = level.u * t
+        cover = (xs[:, None] >= level.x0 - shift) & (xs[:, None] < level.x1 - shift)
+        over = level.kind == OVERHANG
+        out[:, 1] = np.where(cover & ~over, level.y1, 0.0).max(axis=1) / 4.0
+        out[:, 2] = (cover & over).any(axis=1)
+        out[:, 3] = np.where(cover, level.u, 0.0).max(axis=1) / 0.15
+    return out
+
+
 class RunnerEnv:
     """One level at a time. `reset` can start from any saved state, which is how the death bank restarts work."""
 
@@ -131,7 +163,8 @@ class RunnerEnv:
         me = np.array(
             [y / 4.5, vy / 0.6, grounded, 1.0 if self.posture == 2 else 0.0, (level.speed - 0.25) / 0.3]
         )
-        return np.concatenate([d, onehot.ravel(), closing, me]).astype(np.float32)
+        scan = terrain_scan(level, self.state)
+        return np.concatenate([d, onehot.ravel(), closing, scan.ravel(), me]).astype(np.float32)
 
     def step(self, action: int):
         """Returns (obs, reward, outcome, info). outcome is RUNNING, DEAD or DONE."""

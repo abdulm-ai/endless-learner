@@ -7,7 +7,7 @@ A small game and an agent that learns it from its own failures, training forever
 ```mermaid
 flowchart LR
   G["Level generator<br/>seed + tier<br/>solvability check"] --> E["Game<br/>headless, deterministic"]
-  E -->|"9 rays + 5 body features"| A["Agent<br/>NumPy MLP, Double DQN"]
+  E -->|"9 rays, terrain scan,<br/>5 body features"| A["Agent<br/>NumPy MLP, Double DQN<br/>acts with averaged weights"]
   A -->|"noop / short / long / duck"| E
   E -->|n-step transitions| R[("Replay<br/>prioritised by TD error<br/>+ reservoir of all history")]
   E -->|"death: state 20 decisions before"| D[("Death bank")]
@@ -22,7 +22,9 @@ flowchart LR
 
 **The game.** A side-scrolling runner. Each level is a pure function of a tier and a seed: low and tall blocks, gaps, overhangs to duck under, blocks that slide towards the agent, and from tier 5 on, tight combinations of them. The agent can do nothing, jump short, jump long or duck. Tiers have no top: speed, density and the obstacle mix keep turning up until they reach caps set by the physics. Every level is checked solvable before it is handed out, by a depth-first search over jump timings that runs on the same physics code as the game, so no death is the level's fault.
 
-**What the agent sees.** Nine rays fan out from the front of its body. Each reports the distance to the first hit, what was hit (ground, pit, block, overhang) and how fast that distance is closing, which is how a moving block shows up. Five more numbers describe the agent: height, vertical speed, on the ground, ducking, scroll speed. No pixels, so a two-layer MLP is enough and it trains on a CPU.
+**What the agent sees.** Nine rays fan out from the front of its body. Each reports the distance to the first hit, what was hit (ground, pit, block, overhang) and how fast that distance is closing, which is how a moving block shows up. A terrain scan samples the course every half unit for 12 units ahead: ground or pit, block height, overhang above, moving-block speed. Five more numbers describe the agent: height, vertical speed, on the ground, ducking, scroll speed. That is 155 inputs and no pixels, so a 155-128-128-4 MLP is enough and it trains on a CPU.
+
+**Acting.** Double DQN (van Hasselt et al., 2016) with 3-step returns, a hard target sync every 2,000 updates and Adam at 1e-4. The agent acts, and is evaluated and saved, with an exponential moving average of the online weights (Polyak averaging, 0.5% per update), not the online weights themselves. See "What didn't work" for why.
 
 **Learning from failure.**
 
@@ -32,7 +34,7 @@ flowchart LR
 
 **Never stopping.**
 
-- *Exams drive the curriculum.* 30% of fresh levels at the current tier are played with no exploration, and only those count for promotion: with 3% random actions per decision, exploring episodes die often enough to hide how good the policy is. Promotion at 80% over 50 exams, demotion under 20%.
+- *Exams drive the curriculum.* 30% of fresh levels at the current tier are played with no exploration, and only those count for promotion: with 3% random actions per decision, exploring episodes die often enough to hide how good the policy is. Promotion at 80% over 50 exams. Demotion only after a collapse: the tier went well once (50% or better over a window) and then fell under 20%.
 - *Prioritised level replay* (Jiang et al., 2021) inside a tier: seeds whose last episode had a high mean TD error come back more often.
 - *Against forgetting:* 15% of episodes replay a passed tier, and a reservoir sample over the whole history (25% of every batch) keeps old transitions in training after the ring buffer has overwritten them.
 - *Against plasticity loss:* the run tracks dead units, feature rank (srank, Kumar et al., 2021) and weight norm. `--cbp` turns on continual backprop (Dohare et al., 2024), which replaces a trickle of the least useful hidden units with fresh ones.
@@ -42,11 +44,21 @@ flowchart LR
 ## Decisions and trade-offs
 
 - **Double DQN, not PPO.** Learning from failure means going back to old experience. Off-policy replay does that; on-policy methods use each transition once and throw it away.
-- **Rays, not pixels.** Pixels would need convolutions and far more compute. Rays carry what matters (distance, type, closing speed) and work on any generated level.
-- **NumPy, not a framework.** Every gradient is written out and checked against central differences (`python -m endless gradcheck`, max relative error around 1e-8). The cost is speed: 1,400 to 1,900 environment steps per second on one core of an i7-1265U, with a learning update every 4 steps.
+- **Rays and a scan, not pixels.** Pixels would need convolutions and far more compute. Rays and the scan carry what matters (distance, type, height, closing speed) and work on any generated level.
+- **NumPy, not a framework.** Every gradient is written out and checked against central differences (`python -m endless gradcheck`, max relative error around 1e-8). The cost is speed: about 1,500 environment steps per second on one core of an i7-1265U, with a learning update every 4 steps.
 - **Two ticks per decision.** Halves the number of decisions per level, which makes credit assignment easier, at no cost in control: jumps last 10 to 15 decisions.
 - **Promotion on exams, not training episodes.** See above. The held-out evaluation seeds never drive training: they are only measured.
 - **A solvable-level guarantee.** Generation retries until the solver finds a plan, which gets slow at high tiers (tens to hundreds of milliseconds per level beyond tier 15). Levels are cached and replayed seeds are common, so it stays a small share of the time.
+
+## What didn't work
+
+Each of these was found with short runs on this laptop (several in parallel, one core each). The numbers are from those runs, not from the long run.
+
+- **Rays alone.** A fixed fan of rays touches the ground at only four distances (0.8, 1.6, 3.1 and 8.2 units ahead), so the agent couldn't tell where a gap's edge was between them. In four runs of 1.2M steps each, none got past tier 1, the first tier with gaps. Landing in a gap or walking into one killed 26 to 44% of exams. With the terrain scan added, four runs all passed tier 1 within 230k to 340k steps.
+- **Acting with the online weights.** Every update flips the greedy action in some states (policy churn), and an episode is played across about a hundred updates. In one tier-0 run, frozen snapshots of the network passed 100% of 100 random levels while the exams played by the moving network passed about 55%. With the scan in place and 1.5M steps per run, acting with averaged weights reached frontier tier 4 on both seeds. Acting with the online weights reached tier 2 and tier 4. That is two seeds each: a direction, not a measurement.
+- **Learning rate 3e-4.** On tier 0 alone, held-out success at 3e-4 went 1.0, 1.0, 0.6, 0.45 across consecutive eval rounds. At 1e-4 it held 1.0 for four rounds before dipping. Both still wobble, which is part of what the averaged weights are for.
+- **Promoting on training episodes.** With 3% random actions per decision, exploring episodes passed about 40% of tier-0 levels while the same network played greedily passed 100% of the held-out ones. The curriculum never moved, which is why exams exist.
+- **Demoting on first contact.** A new tier is hard at first. With demotion at "under 20% over 50 exams", runs bounced between tiers 2 and 3 one to four times in 1.5M steps, each round trip costing about 230k to 270k steps.
 
 ## KPIs
 

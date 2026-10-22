@@ -4,6 +4,7 @@ import unittest
 
 import numpy as np
 
+from endless.curriculum import Curriculum
 from endless.failure import DeathBank
 from endless.metrics import read_only
 from endless.trainer import Trainer, TrainConfig
@@ -38,6 +39,23 @@ class TestTrainer(unittest.TestCase):
             con.close()
             self.assertIn("resume", kinds)
             self.assertGreater(evals, 0)
+
+
+class TestCurriculum(unittest.TestCase):
+    def test_promotes_and_only_demotes_after_a_collapse(self):
+        c = Curriculum(window=10, promote=0.8, demote=0.2, collapse_from=0.5)
+        for _ in range(10):
+            c.record(True)
+        self.assertEqual(c.tier, 1)
+        for _ in range(30):  # a new tier going badly from the start is not a collapse
+            c.record(False)
+        self.assertEqual(c.tier, 1)
+        for i in range(10):
+            c.record(i % 2 == 0)
+        self.assertEqual(c.tier, 1)  # 50%: neither promote nor demote, but now it has gone well once
+        changes = [c.record(False) for _ in range(10)]
+        self.assertIn("demote", changes)
+        self.assertEqual(c.tier, 0)
 
 
 class TestDeathBank(unittest.TestCase):

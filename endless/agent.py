@@ -22,7 +22,8 @@ from . import nn
 @dataclass
 class AgentConfig:
     hidden: tuple[int, ...] = (128, 128)
-    lr: float = 3e-4
+    lr: float = 1e-4
+    actor_tau: float = 0.005  # EMA rate of the acting weights per update; 1.0 acts with the online net
     gamma: float = 0.99
     n_step: int = 3
     batch: int = 64
@@ -40,6 +41,7 @@ class DQN:
         self.sizes = [obs_dim, *cfg.hidden, n_actions]
         self.online = nn.init_mlp(self.sizes, rng)
         self.target = [p.copy() for p in self.online]
+        self.actor = [p.copy() for p in self.online]
         self.opt = nn.Adam(self.online, lr=cfg.lr)
         self.updates = 0
         self.rng = rng
@@ -53,7 +55,15 @@ class DQN:
         return nn.forward(self.online, obs)[0]
 
     def act(self, obs: np.ndarray, eps: float) -> tuple[int, np.ndarray]:
-        q = nn.forward(self.online, obs[None])[0][0]
+        """Acts with the averaged weights, not the online ones.
+
+        Every update flips the greedy action in some states (policy churn), and
+        in a game where a jump one tick late is a death, an episode played by a
+        network that changes a hundred times along the way does far worse than
+        any frozen snapshot of it. An exponential moving average of the weights
+        (Polyak averaging) moves slowly enough to play consistently.
+        """
+        q = nn.forward(self.actor, obs[None])[0][0]
         if self.rng.random() < eps:
             return int(self.rng.integers(len(q))), q
         return int(q.argmax()), q
@@ -73,6 +83,9 @@ class DQN:
         grads = nn.backward(self.online, acts, dq)
         norm = nn.clip_by_norm(grads, self.cfg.grad_clip)
         self.opt.step(self.online, grads)
+        tau = self.cfg.actor_tau
+        for pa, po in zip(self.actor, self.online):
+            pa += tau * (po - pa)
         self.updates += 1
         if self.updates % self.cfg.target_every == 0:
             self.target = [p.copy() for p in self.online]
@@ -132,6 +145,7 @@ class DQN:
         return {
             "online": self.online,
             "target": self.target,
+            "actor": self.actor,
             "opt": self.opt.state(),
             "updates": self.updates,
             "utility": self.utility,
@@ -141,7 +155,7 @@ class DQN:
         }
 
     def load(self, s: dict) -> None:
-        self.online, self.target = s["online"], s["target"]
+        self.online, self.target, self.actor = s["online"], s["target"], s["actor"]
         self.opt.load(s["opt"])
         self.updates = s["updates"]
         self.utility, self.age = s["utility"], s["age"]

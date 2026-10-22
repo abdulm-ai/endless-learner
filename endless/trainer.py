@@ -306,6 +306,7 @@ class Trainer:
         self.nan_events += 1
         self.agent.online = [p.copy() for p in self.last_good]
         self.agent.target = [p.copy() for p in self.last_good]
+        self.agent.actor = [p.copy() for p in self.last_good]
         for m, v in zip(self.agent.opt.m, self.agent.opt.v):
             m[...] = 0.0
             v[...] = 0.0
@@ -375,7 +376,7 @@ class Trainer:
             for seed in self.sampler.seen(tier, c.eval_levels):
                 levels.append(self.cache.get(tier, seed))
                 tags.append((tier, "train"))
-        results = run_levels(levels, greedy(self.agent.online))
+        results = run_levels(levels, greedy(self.agent.actor))
         groups: dict = {}
         for tag, r in zip(tags, results):
             groups.setdefault(tag, []).append(r)
@@ -403,10 +404,10 @@ class Trainer:
         }
 
     def _save_latest(self) -> None:
-        save_net(os.path.join(self.dir, "latest_net.npz"), self.agent.online, self._meta())
+        save_net(os.path.join(self.dir, "latest_net.npz"), self.agent.actor, self._meta())
 
     def _save_hof(self) -> None:
-        save_net(os.path.join(self.dir, "hof", f"h{self.next_hof:04d}.npz"), self.agent.online, self._meta())
+        save_net(os.path.join(self.dir, "hof", f"h{self.next_hof:04d}.npz"), self.agent.actor, self._meta())
         self.next_hof += 1
 
     def checkpoint(self) -> None:
