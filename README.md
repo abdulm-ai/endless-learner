@@ -45,7 +45,7 @@ flowchart LR
 
 - **Double DQN, not PPO.** Learning from failure means going back to old experience. Off-policy replay does that; on-policy methods use each transition once and throw it away.
 - **Rays and a scan, not pixels.** Pixels would need convolutions and far more compute. Rays and the scan carry what matters (distance, type, height, closing speed) and work on any generated level.
-- **NumPy, not a framework.** Every gradient is written out and checked against central differences (`python -m endless gradcheck`, max relative error around 1e-8). The cost is speed: about 1,500 environment steps per second on one core of an i7-1265U, with a learning update every 4 steps.
+- **NumPy, not a framework.** Every gradient is written out and checked against central differences (`python -m endless gradcheck`, max relative error around 1e-8). The cost is speed: a median of about 1,070 environment steps per second on one core of an i7-1265U over a 2.5M-step run, with a learning update every 4 steps, and about 230 MB of RAM (most of it the 100k-transition replay buffer).
 - **Two ticks per decision.** Halves the number of decisions per level, which makes credit assignment easier, at no cost in control: jumps last 10 to 15 decisions.
 - **Promotion on exams, not training episodes.** See above. The held-out evaluation seeds never drive training: they are only measured.
 - **A solvable-level guarantee.** Generation retries until the solver finds a plan, which gets slow at high tiers (tens to hundreds of milliseconds per level beyond tier 15). Levels are cached and replayed seeds are common, so it stays a small share of the time.

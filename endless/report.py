@@ -75,16 +75,22 @@ def report(run: str, hof: bool = False) -> dict:
     td = _q(con, "SELECT AVG(td_near_death), AVG(td_routine) FROM train WHERE id > ?", (int(n_tr * 0.8),))[0]
     if td[0] is not None:
         print(f"  |TD| near deaths {td[0]:.3f} vs routine {td[1]:.3f} (last 20% of training), ratio {td[0] / td[1]:.1f}x")
-    exams = _q(con, "SELECT death_sig FROM episodes WHERE kind='exam' ORDER BY id")
-    if len(exams) >= 40:
-        q = len(exams) // 4
-        early, late = exams[:q], exams[-q:]
-        sigs = sorted({e[0] for e in exams if e[0]}, key=lambda s: -sum(1 for e in exams if e[0] == s))
-        print("  deaths per exam by cause, first quarter of exams vs last quarter")
-        for s in sigs[:8]:
-            a = sum(1 for e in early if e[0] == s) / len(early)
-            b = sum(1 for e in late if e[0] == s) / len(late)
-            print(f"    {s:<16} {a:.3f} -> {b:.3f}")
+    # Within each tier, so a harder tier later in the run doesn't read as the agent getting worse.
+    by_tier: dict = {}
+    for tier, sig in _q(con, "SELECT tier, death_sig FROM episodes WHERE kind='exam' ORDER BY id"):
+        by_tier.setdefault(tier, []).append(sig)
+    shown = False
+    for tier, sigs in sorted(by_tier.items()):
+        if len(sigs) < 80:
+            continue
+        if not shown:
+            print("  deaths per exam by cause, first quarter vs last quarter of the exams at each tier")
+            shown = True
+        q = len(sigs) // 4
+        early, late = sigs[:q], sigs[-q:]
+        common = sorted({s for s in sigs if s}, key=lambda s: -sigs.count(s))
+        parts = [f"{s} {early.count(s) / q:.2f}->{late.count(s) / q:.2f}" for s in common[:4] if sigs.count(s) >= 5]
+        print(f"    tier {tier} ({len(sigs)} exams): " + ", ".join(parts))
 
     # ---- never stops
     print("\nNever stops")

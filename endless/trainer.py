@@ -62,7 +62,7 @@ class TrainConfig:
     promote: float = 0.8
     demote: float = 0.2
     eval_every: int = 200_000
-    eval_levels: int = 10
+    eval_levels: int = 20
     frontier_success: float = 0.8
     log_every: int = 5_000
     plasticity_every: int = 50_000
