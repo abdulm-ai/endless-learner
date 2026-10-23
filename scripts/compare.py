@@ -10,7 +10,7 @@ import os
 import sqlite3
 import statistics as st
 
-ROOT = r"C:\Users\abdul\showcase\endless-learner"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def con(run):
